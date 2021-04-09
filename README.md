@@ -15,4 +15,6 @@ There are currently three stages of this project:
 - stage 2 - computer can deploy ejection charges
 - stage 3 - computer can transmit telemetry data to a ground station
 
-Currently we are in stage 1
+Stage 1 is complete!
+
+Currently we are in stage 2
