@@ -12,7 +12,7 @@
  * --- SD CARD ---
  * MOSI - pin 11
  * MISO - pin 12
- * CLK - pin 13
+ * CLK/sck - pin 13
  * CS - 4
  * VCC - 5V
  * GND - GND
@@ -42,80 +42,79 @@ BMP280_DEV bmp280;                             // Create an object for the BMP28
 File dataFile;                                 // Create file object for the SD card
 
 ////////////////////// Global Variables //////////////////////
-unsigned long DTime = 0;                      // Used to keep time from initial power-up
-
-float temp, pres, alt;                         // Variables for bmp280
-
 const int SDselect = 4;                        // Pin for CS
 int numFiles = 0;                             
 String fileName = "Data";                      // File name format "filename"XX.csv
 
-long gyroX, gyroY, gyroZ, accX, accY, accZ, angleX, angleY, angleZ;
+float DATA[12]; // (DTime, temp, pres, alt, gyroX, gyroY, gyroZ, accX, accY, accZ, angleX, angleY, angleZ)
 
 ////////////////////// Setup //////////////////////
 void setup()
 {
-  Serial.begin(115200);                         // Used for debug can be disabled later
-  while(!Serial) { }                            // Wait for Serial (IMPORTANT TO COMMENT OUT LATER OR DEVICE WON'T WORK)
-
+  //Serial.begin(115200);                         // Used for debug can be disabled later
+  
   Wire.begin();
   mpu6050.begin();
-  mpu6050.calcGyroOffsets(true);                // The device will need to be stable for at least 10 sec
+  mpu6050.calcGyroOffsets(true);                // The device will need to be stable for at least 5 sec
   
-  bmp280.begin();
+  bmp280.begin(BMP280_I2C_ALT_ADDR);
   bmp280.setPresOversampling(OVERSAMPLING_X4);  // Options are OVERSAMPLING_SKIP, _X1, _X2, _X4, _X8, _X16
   bmp280.setTempOversampling(OVERSAMPLING_X4);  // Options are OVERSAMPLING_SKIP, _X1, _X2, _X4, _X8, _X16
   bmp280.setTimeStandby(TIME_STANDBY_62MS);     // Options are TIME_STANDBY_05MS, _62MS, _125MS, _250MS, _500MS, _1000MS, 2000MS, 4000MS
-  bmp280.setIIRFilter(IIR_FILTER_16);           // Options are IIR_FILTER_OFF, _2, _4, _8, _16
+  bmp280.setIIRFilter(IIR_FILTER_4);            // Options are IIR_FILTER_OFF, _2, _4, _8, _16
   bmp280.startNormalConversion();
 
-  Serial.print("Initializing SD card...");
   if (!SD.begin(SDselect))                      // Stops device is no SD card is found
   {
     Serial.println("Card failed");
-    while(1);                                   // Write some form of led debug function here ****
+    while(1);
   }
-  Serial.println("card initialized.");
-  dataFile = SD.open("/");                      // Open at highest directory
+  dataFile = SD.open("/");                      // Opens at highest directory
   fileName = fileName + String(numOfFiles(dataFile)) + String(".csv");
+  dataFile.close();   
+  //Serial.println(fileName);                   // For debug
   dataFile = SD.open(fileName, FILE_WRITE);
   if (dataFile)                                 // Print header of CSV file
   {
-    dataFile.print("Time(ms),Temperature(C),Pressure(hPa),Altitude(m),GyroX,GyroY,GyroZ,AccX,AccY,AccZ,AngleX(°),AngleY(°),AngleZ(°)");
-    dataFile.close();
+    dataFile.print("Time(ms),Temp(C),Pres(hPa),Alt(m),GyroX,GyroY,GyroZ,AccX,AccY,AccZ,AngX,AngleY,AngZ,\n");
   }
+  dataFile.close();
 }
 
 ////////////////////// Main ////////////////////// 
 void loop()
 {
-  DTime = millis();                              // Keep track of time in milliseconds
-  
-  mpu6050.update();                              // Get latest measurements from MPU6050
-  gyroX = mpu6050.getGyroX();
-  gyroY = mpu6050.getGyroY();
-  gyroZ = mpu6050.getGyroZ();
-  accX = mpu6050.getAccX();
-  accY = mpu6050.getAccY();
-  accZ = mpu6050.getAccZ();
-  angleX = mpu6050.getAngleX();
-  angleY = mpu6050.getAngleY();
-  angleZ = mpu6050.getAngleZ();
+  DATA[0] = millis();                             // Keep track of time in milliseconds
 
-  if (bmp280.getMeasurements(temp, pres, alt))   // Temp in C, Pres in hPa, alt in m
-  {
-    Serial.print(temp);                          // Display the results (for debug)   
-    Serial.print("*C   ");
-    Serial.print(pres);    
-    Serial.print("hPa   ");
-    Serial.print(alt);
-    Serial.println("m");
-  }
-  saveData();
+  mpu6050.update();                               // Get latest measurements from MPU6050
+  DATA[4] = mpu6050.getGyroX();
+  DATA[5] = mpu6050.getGyroY();
+  DATA[6] = mpu6050.getGyroZ();
+  DATA[7] = mpu6050.getAccX();
+  DATA[8] = mpu6050.getAccY();
+  DATA[9] = mpu6050.getAccZ();
+  DATA[10] = mpu6050.getAngleX();
+  DATA[11] = mpu6050.getAngleY();
+  DATA[12] = mpu6050.getAngleZ();
+  
+  bmp280.getMeasurements(DATA[1], DATA[2], DATA[3]);   // (temp,pres,alt) Temp in C, Pres in hPa, alt in m
+  
+  //printData();
+  saveData(fileName);
 }
 
 ////////////////////// Functions //////////////////////
-int numOfFiles(File dir)                          // Returns number of files on SD card
+void printData()                                  // Prints data in serial monitor
+{
+  for (int i = 0; i < 13; i++) 
+  {
+   Serial.print(DATA[i]);
+   Serial.print(", ");
+  }
+  Serial.println();
+}
+
+int numOfFiles(File dir)                           // Determines number of files located in directory
 {
   while (true) 
   {
@@ -130,36 +129,17 @@ int numOfFiles(File dir)                          // Returns number of files on 
   return numFiles;
 }
 
-void saveData() 
+void saveData(String fileName)                      // Saves data on SD card
 {
+  dataFile = SD.open(fileName, FILE_WRITE);
   if (dataFile)
   {
-    dataFile.print(DTime);
-    dataFile.print(",");
-    dataFile.print(temp);
-    dataFile.print(",");
-    dataFile.print(pres);
-    dataFile.print(",");
-    dataFile.print(alt);
-    dataFile.print(",");
-    dataFile.print(gyroX);
-    dataFile.print(",");
-    dataFile.print(gyroY);
-    dataFile.print(",");
-    dataFile.print(gyroZ);
-    dataFile.print(",");
-    dataFile.print(accX);
-    dataFile.print(",");
-    dataFile.print(accY);
-    dataFile.print(",");
-    dataFile.print(accZ);
-    dataFile.print(",");
-    dataFile.print(angleX);
-    dataFile.print(",");
-    dataFile.print(angleY);
-    dataFile.print(",");
-    dataFile.print(angleZ);
+    for (int i = 0; i < 13; i++)
+    {
+      dataFile.print(DATA[i]);
+      dataFile.print(",");
+    }
     dataFile.print("\n");
-    dataFile.close();
   }
+  dataFile.close();
 }
